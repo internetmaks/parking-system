@@ -41,6 +41,8 @@ INDEKS = 12
 
 _workers = {}
 _pool_lock = threading.Lock()
+_http = requests.Session()
+_server_base_url = None
 
 
 def simulate_parking(parking: str, flat_buf: bytes, n_days: int):
@@ -205,8 +207,9 @@ def process_and_send(raw: bytes):
     aggregates, n_events, n_days = compute_aggregates(raw)
     elapsed = time.perf_counter() - start
     logging.info(f'Przetworzono {n_events} zdarzeń w {elapsed:.3f} s, wysyłam wynik ({n_days} dni)')
-    res = requests.post(
-        f"http://{SERVER_IP}:{SERVER_PORT}/results",
+    base_url = _server_base_url or f"http://{SERVER_IP}:{SERVER_PORT}"
+    res = _http.post(
+        f"{base_url}/results",
         json={"ip_addr": CLIENT_IP, "port": CLIENT_PORT, "indeks": INDEKS, "aggregates": aggregates},
         timeout=60,
     )
@@ -243,19 +246,25 @@ def print_verdict(res):
 
 def register():
     """Rejestracja na serwerze - ponawiana, dopóki serwer nie odpowie."""
+    global _server_base_url
+    candidates = ['127.0.0.1', 'localhost'] if SERVER_IP == 'localhost' else [SERVER_IP]
     while True:
-        try:
-            res = requests.post(
-                f"http://{SERVER_IP}:{SERVER_PORT}/clients/handshake",
-                json={"ip_addr": CLIENT_IP, "port": CLIENT_PORT, "indeks": INDEKS},
-                timeout=5,
-            )
-            if res.status_code == 201:
-                logging.info(f'Zarejestrowano na serwerze {SERVER_IP}:{SERVER_PORT} jako {INDEKS}. Czekam na dane...')
-                return
-            logging.error(f'Serwer odrzucił rejestrację ({res.status_code}): {res.text}')
-        except requests.RequestException:
-            logging.warning(f'Serwer {SERVER_IP}:{SERVER_PORT} niedostępny - ponowna próba za 3 s')
+        for host in candidates:
+            base_url = f"http://{host}:{SERVER_PORT}"
+            try:
+                res = _http.post(
+                    f"{base_url}/clients/handshake",
+                    json={"ip_addr": CLIENT_IP, "port": CLIENT_PORT, "indeks": INDEKS},
+                    timeout=5,
+                )
+                if res.status_code == 201:
+                    _server_base_url = base_url
+                    logging.info(f'Zarejestrowano na serwerze {SERVER_IP}:{SERVER_PORT} jako {INDEKS}. Czekam na dane...')
+                    return
+                logging.error(f'Serwer odrzucił rejestrację ({res.status_code}): {res.text}')
+            except requests.RequestException:
+                pass
+        logging.warning(f'Serwer {SERVER_IP}:{SERVER_PORT} niedostępny - ponowna próba za 3 s')
         time.sleep(3)
 
 
