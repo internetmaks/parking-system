@@ -208,11 +208,14 @@ def process_and_send(raw: bytes):
     elapsed = time.perf_counter() - start
     logging.info(f'Przetworzono {n_events} zdarzeń w {elapsed:.3f} s, wysyłam wynik ({n_days} dni)')
     base_url = _server_base_url or f"http://{SERVER_IP}:{SERVER_PORT}"
-    res = _http.post(
-        f"{base_url}/results",
-        json={"ip_addr": CLIENT_IP, "port": CLIENT_PORT, "indeks": INDEKS, "aggregates": aggregates},
-        timeout=60,
-    )
+    url = f"{base_url}/results"
+    payload = {"ip_addr": CLIENT_IP, "port": CLIENT_PORT, "indeks": INDEKS, "aggregates": aggregates}
+    try:
+        res = _http.post(url, json=payload, timeout=60)
+    except requests.RequestException:
+        # Odśwież połączenie, jeśli serwer zamknął nieaktywny socket keep-alive między eksperymentami
+        _http.close()
+        res = _http.post(url, json=payload, timeout=60)
     print_verdict(res)
 
 
